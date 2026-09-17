@@ -751,6 +751,6 @@ module.exports = {
     getMutantEffectByIcon,
     getAllMutantEffects,
     getMutantEffectsByIds,
-    getKnownPlantName
-    getPlantByIdOrSeedId
+    getKnownPlantName,
+    getPlantByIdOrSeedId,
 };
