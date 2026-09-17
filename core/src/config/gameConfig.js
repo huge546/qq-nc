@@ -115,10 +115,11 @@ function loadConfigs() {
                     grow_phases: entry.grow_phases || '',
                     exp: Number(entry.exp) || 0,
                     planting_priority: Math.max(0, Number(entry.planting_priority) || 0),
+                    mutant_effect_plant: entry.mutant_effect_plant || existing?.mutant_effect_plant || '',
                 };
                 plantMap.set(plant.id, plant);
-                seedToPlant.set(plant.seed_id, plant);
-                fruitToPlant.set(plant.fruit.id, plant);
+                if (plant.seed_id) seedToPlant.set(plant.seed_id, plant);
+                if (plant.fruit && plant.fruit.id) fruitToPlant.set(plant.fruit.id, plant);
             }
             plantConfig = [...plantMap.values()];
             console.warn(`[配置] 已合并活动植物配置 (${  eventPlants.length  } 种)`);
@@ -151,6 +152,7 @@ function loadConfigs() {
             const eventPlants = JSON.parse(fs.readFileSync(eventPlantPath, 'utf8'));
             for (const entry of eventPlants) {
                 if (isInvalidPlant(entry)) continue;
+                if (!Number(entry.seed_id)) continue;
                 const seedId = Number(entry.seed_id);
                 const plant = seedToPlant.get(seedId);
                 const fruitId = Number(plant && plant.fruit && plant.fruit.id) || Number(entry.fruit_id);
@@ -705,6 +707,17 @@ function getMutantEffectsByIds(ids) {
 // 启动时加载配置
 loadConfigs();
 
+/** 只返回配置中确认过的名称；未知时返回空串，供服务端名称优先的展示链路使用。 */
+function getKnownPlantName(plantId) {
+    return getPlantByIdOrSeedId(plantId)?.name || '';
+}
+
+/** 根据服务端可能返回的植物 ID 或种子 ID 找到植物配置。 */
+function getPlantByIdOrSeedId(id) {
+    const numericId = Number(id) || 0;
+    return plantMap.get(numericId) || seedToPlant.get(numericId);
+}
+
 module.exports = {
     loadConfigs,
     getAllPlants,
@@ -737,5 +750,7 @@ module.exports = {
     getMutantEffectById,
     getMutantEffectByIcon,
     getAllMutantEffects,
-    getMutantEffectsByIds
+    getMutantEffectsByIds,
+    getKnownPlantName
+    getPlantByIdOrSeedId
 };
