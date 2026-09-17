@@ -98,6 +98,20 @@ function createAutoCodeRefreshService(deps) {
       if (recovery) recovery.failures = 0;
       return true;
     } catch (err) {
+      // 凭证确定失效：重试/续期都不可能成功，直接熔断，不再消耗当日恢复次数
+      const definitive = typeof wxLoginAdapter.isDefinitiveWxCredentialError === 'function'
+        && wxLoginAdapter.isDefinitiveWxCredentialError(err && err.message);
+      if (definitive) {
+        scheduler.clear(getKeepaliveTaskName(accountId));
+        addAccountLog('auto_relogin_blocked',
+          '微信凭证已确定失效，已停止自动重登与保活（请在面板重新扫码登录）',
+          account.id, account.name, { reason, message: err.message });
+        log('错误', `自动刷新 Code 已熔断: ${account.name} - ${err.message}`, {
+          accountId: String(account.id),
+          accountName: account.name,
+        });
+        return false;
+      }
       if (recovery) recovery.failures += 1;
       addAccountLog('auto_code_refresh_failed', `自动刷新 Code 失败: ${  err.message}`,
         account.id, account.name, { reason });
@@ -137,6 +151,14 @@ function createAutoCodeRefreshService(deps) {
           log('错误', `微信凭证保活失败: ${latest.name} - ${result.Message || '未知错误'}`, {
             accountId: String(accountId), accountName: latest.name,
           });
+          const definitive = typeof wxLoginAdapter.isDefinitiveWxCredentialError === 'function'
+            && wxLoginAdapter.isDefinitiveWxCredentialError(result.Message);
+          if (definitive) {
+            scheduler.clear(getKeepaliveTaskName(accountId));
+            log('错误',
+              `微信凭证已确定失效，已停止保活轮询: ${latest.name}（请重新扫码登录）`,
+              { accountId: String(accountId), accountName: latest.name });
+          }
         }
       }, { preventOverlap: true });
     }
