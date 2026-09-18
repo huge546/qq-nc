@@ -17,6 +17,7 @@ const { getDataDir } = require('../config/runtime-paths');
 const { createModuleLogger } = require('./logger');
 const { readJsonFile, writeJsonFileAtomic } = require('./json-db');
 const { getBag, getBagItems } = require('./warehouse');
+const bearActivity = require('./season-bear-activity');
 
 const activityLogger = createModuleLogger('activity');
 
@@ -2948,6 +2949,63 @@ async function getNanguaShop() {
   return normalizeNanguaGroup(await getActivityGroup(NANGUA_SHOP_ACTIVITY_ID));
 }
 
+async function getBagItemCounts(itemIds) {
+  const wanted = new Set((itemIds || []).map(toNum).filter(itemId => itemId > 0));
+  const counts = new Map([...wanted].map(itemId => [itemId, 0]));
+  if (wanted.size === 0) return { counts, available: true };
+  try {
+    const bag = await getBag();
+    for (const item of getBagItems(bag) || []) {
+      const itemId = toNum(item?.id);
+      if (!wanted.has(itemId)) continue;
+      counts.set(itemId, (counts.get(itemId) || 0) + Math.max(0, toNum(item?.count)));
+    }
+    return { counts, available: true };
+  } catch {
+    // 活动树仍可只读展示，道具数量退化为 0。
+    return { counts, available: false };
+  }
+}
+
+async function getBearActivity(options = {}) {
+  const listReader = options.getActivityDiscoveryList || getActivityDiscoveryList;
+  const snapshotReader = options.getActivityGroupSnapshot || getActivityGroupSnapshot;
+  const inventoryReader = options.getBagItemCounts || getBagItemCounts;
+  const activities = await listReader();
+  if (!(activities || []).some(node => toNum(node.id) === bearActivity.BEAR_ACTIVITY_ID && toNum(node.parentId) === 0)) {
+    throw new Error('S3 萌宠未由当前 ActivityService.List 下发，停止读取活动详情');
+  }
+  const snapshot = await snapshotReader(bearActivity.BEAR_ACTIVITY_ID, '');
+  if (toNum(snapshot?.id) !== bearActivity.BEAR_ACTIVITY_ID) {
+    throw new Error('S3 萌宠活动组不匹配，停止读取');
+  }
+  const shop = snapshot.children?.find(node => toNum(node.id) === bearActivity.BEAR_SHOP_ACTIVITY_ID);
+  const ids = [
+    bearActivity.BEAR_CURRENCY_ITEM_ID,
+    bearActivity.BEAR_CAKE_ITEM_ID,
+    bearActivity.BEAR_SEED_ITEM_ID,
+    bearActivity.BEAR_BASIC_CHALLENGE_ITEM_ID,
+    bearActivity.BEAR_MIDDLE_CHALLENGE_ITEM_ID,
+    bearActivity.BEAR_ADVANCED_CHALLENGE_ITEM_ID,
+    bearActivity.BEAR_TREASURE_ITEM_ID,
+    ...bearActivity.getBearObservedItemIds(snapshot),
+    ...(shop?.details?.exchangeShop?.items || []).map(item => item.itemId),
+  ];
+  let inventory = { counts: new Map(), available: false };
+  try {
+    inventory = await inventoryReader([...new Set(ids)]);
+  } catch { /* 背包失败仍展示活动说明，数量保持未知，不循环重试。 */ }
+  const activity = bearActivity.normalizeBearActivity(snapshot, {
+    ...options, counts: inventory.counts, inventoryAvailable: inventory.available,
+  });
+  activityLogger.info('S3 萌宠只读状态刷新', {
+    event: 'bear_activity_read', activityId: bearActivity.BEAR_ACTIVITY_ID,
+    gameplayCount: activity.gameplayGuides.length, exchangeItemCount: activity.exchangeShop.length,
+    inventoryAvailable: activity.inventoryAvailable,
+  });
+  return activity;
+}
+
 module.exports = {
   NANGUA_ACTIVITY_UID,
   HELU_ACTIVITY_UID,
@@ -3033,4 +3091,5 @@ module.exports = {
   refreshNanguaShop,
   normalizeNanguaGroup,
   normalizeHeluGroup,
+  getBearActivity,
 };
