@@ -7,6 +7,7 @@ exports.checkQR = checkQR;
 exports.consumePendingWxInfo = consumePendingWxInfo;
 exports.getAccountAvatar = getAccountAvatar;
 exports.getFarmCode = getFarmCode;
+exports.isDefinitiveWxCredentialError = isDefinitiveWxCredentialError;
 exports.getQRCode = getQRCode;
 exports.keepWxCredentialAlive = keepWxCredentialAlive;
 exports.peekPendingWxInfo = peekPendingWxInfo;
@@ -163,6 +164,28 @@ function humanizeWxCodeError(raw) {
         return '无法连接微信服务器（网络波动），请稍后重试；若持续失败请重新扫码登录';
     }
     return s;
+}
+
+/**
+ * 判定是否为「凭证确定失效」错误 —— 这类错误重试/续期都不可能成功，只能重新扫码。
+ * 与 humanizeWxCodeError 的区别：那个产出给用户看的文案，这个用于程序决策（熔断、停止保活）。
+ * 判定刻意收窄：宁可多试一次，也不误判把可恢复的错误（网络波动）熔断掉。
+ */
+const DEFINITIVE_CREDENTIAL_PATTERNS = [
+    'ManualAuth rejected',
+    'invalid scope',
+    '40188',
+    'code=-109',
+    '凭证已失效',
+    '缺少应用宝登录凭据',
+    '缺少登录凭证',
+    '缺少微信凭证',
+    '扫码会话无效或已过期',
+];
+function isDefinitiveWxCredentialError(raw) {
+    const s = String(raw || '');
+    if (!s) return false;
+    return DEFINITIVE_CREDENTIAL_PATTERNS.some(p => s.includes(p));
 }
 /**
  * 获取微信登录二维码
